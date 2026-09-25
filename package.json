@@ -1,0 +1,44 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "fotoduo",
+  "title": "Fotoduo - Lousa de Prints",
+  "description": "Junte capturas de tela em uma lousa interativa com corte de bordas, borracha, textos e exportação em qualidade nativa.",
+  "icon": "command-icon.png",
+  "author": "rogerio_araujo_costa",
+  "categories": [
+    "Productivity",
+    "Design-Tools"
+  ],
+  "license": "MIT",
+  "platforms": [
+    "macOS",
+    "Windows"
+  ],
+  "scripts": {
+    "setup": "node scripts/setup.js",
+    "build": "ray build -e dist -o dist",
+    "postbuild": "node scripts/sync-build.js",
+    "dev": "ray develop",
+    "lint": "ray lint"
+  },
+  "dependencies": {
+    "@raycast/api": "^1.104.7",
+    "@raycast/utils": "^1.18.1",
+    "sharp": "^0.35.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "@types/react": "^18.3.18",
+    "react": "^18.3.1",
+    "typescript": "^5.7.3"
+  },
+  "commands": [
+    {
+      "name": "fotoduo",
+      "title": "Fotoduo: Colagem de Prints",
+      "subtitle": "Lousa de Capturas",
+      "description": "Selecione capturas recentes e abra a lousa de colagem",
+      "mode": "view"
+    }
+  ]
+}

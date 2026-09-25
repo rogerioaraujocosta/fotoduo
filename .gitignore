@@ -1,0 +1,33 @@
+# Dependências
+node_modules/
+web/node_modules/
+.pnpm-store/
+
+# Arquivos de Build / Compilação
+dist/
+web/dist/
+
+# Logs e arquivos temporários
+*.log
+dev.log
+server.log
+err.txt
+out.txt
+cli.pid
+*.tmp
+
+# Variáveis de ambiente e segredos locais
+.env
+.env.local
+.env.*.local
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editores e IDEs
+.vscode/
+.idea/
+*.suo
+*.user

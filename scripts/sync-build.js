@@ -16,7 +16,15 @@ function copyDirRecursive(src, dest) {
     if (entry.isDirectory()) {
       copyDirRecursive(srcPath, destPath);
     } else {
-      fs.copyFileSync(srcPath, destPath);
+      try {
+        fs.copyFileSync(srcPath, destPath);
+      } catch (err) {
+        if ((err.code === 'EBUSY' || err.code === 'EPERM') && entry.name.endsWith('.exe')) {
+          console.warn(`[Fotoduo Sync] Aviso: ${entry.name} está em uso no momento, mantendo versão já existente em destino.`);
+        } else {
+          throw err;
+        }
+      }
     }
   }
 }
@@ -24,13 +32,22 @@ function copyDirRecursive(src, dest) {
 const rootDir = path.resolve(__dirname, '..');
 const distDir = path.join(rootDir, 'dist');
 
-// 1. Garantir que dist/assets/bin existe e copiar helper do clipboard e ícone
+// 1. Garantir que dist/assets/bin existe e copiar todos os helpers .exe e ícone
 const distAssetsBin = path.join(distDir, 'assets', 'bin');
 fs.mkdirSync(distAssetsBin, { recursive: true });
 
-const srcClipboardExe = path.join(rootDir, 'assets', 'bin', 'fotoduo-clipboard.exe');
-if (fs.existsSync(srcClipboardExe)) {
-  fs.copyFileSync(srcClipboardExe, path.join(distAssetsBin, 'fotoduo-clipboard.exe'));
+const srcAssetsBin = path.join(rootDir, 'assets', 'bin');
+if (fs.existsSync(srcAssetsBin)) {
+  const binFiles = fs.readdirSync(srcAssetsBin);
+  for (const f of binFiles) {
+    if (f.endsWith('.exe')) {
+      try {
+        fs.copyFileSync(path.join(srcAssetsBin, f), path.join(distAssetsBin, f));
+      } catch (err) {
+        console.warn(`[Fotoduo Sync] Aviso ao copiar ${f}: ${err.message}`);
+      }
+    }
+  }
 }
 
 const srcIcon = path.join(rootDir, 'assets', 'command-icon.png');

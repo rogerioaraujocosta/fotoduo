@@ -11,10 +11,17 @@ import {
   Color, 
   showToast, 
   Toast, 
-  closeMainWindow 
+  closeMainWindow,
+  showHUD
 } from '@raycast/api';
-import { getRecentScreenshots, ScreenshotFile, getClipboardHelperExe } from './utils/scanner';
+import { getAllScreenshotsWithClipboard, getRecentScreenshots, ScreenshotFile, getClipboardHelperExe } from './utils/scanner';
 import { launchFotoduoWindow } from './utils/launcher';
+import { detectExplorerFolder, saveImagesToFolder, ExplorerDetection, ExplorerFolder } from './utils/explorer';
+
+function truncate(str: string, maxLen: number): string {
+  if (!str) return '';
+  return str.length <= maxLen ? str : str.slice(0, maxLen - 1) + '…';
+}
 
 const logDebug = (msg: string) => {
   try {
@@ -27,6 +34,7 @@ export default function Command() {
   const [screenshots, setScreenshots] = useState<ScreenshotFile[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [explorer, setExplorer] = useState<ExplorerDetection | null>(null);
 
   const isInitialMountRef = useRef<boolean>(true);
   const focusedItemIdRef = useRef<string | null>(null);
@@ -34,25 +42,48 @@ export default function Command() {
   const clickHandledTimeRef = useRef<number>(0);
   const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const loadScreenshots = () => {
-    setIsLoading(true);
+  const loadScreenshots = async () => {
     try {
-      // Limite estrito de 10 capturas recentes para velocidade máxima
-      const items = getRecentScreenshots(10);
-      setScreenshots(items);
-    } catch (err: any) {
-      showToast({
-        style: Toast.Style.Failure,
-        title: 'Erro ao listar capturas',
-        message: err.message,
+      const { items } = await getAllScreenshotsWithClipboard(10);
+      setScreenshots(prev => {
+        if (
+          prev.length === items.length &&
+          prev.every((it, idx) => it.id === items[idx].id && it.name === items[idx].name)
+        ) {
+          return prev;
+        }
+        return items;
       });
+    } catch (err: any) {
+      logDebug(`loadScreenshots erro: ${err?.message}`);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
+    // 1. Carrega imediatamente fotos do disco (0ms)
+    try {
+      const initial = getRecentScreenshots(10);
+      if (initial.length > 0) {
+        setScreenshots(initial);
+        setIsLoading(false);
+      }
+    } catch {}
+
+    // 2. Busca imediatamente da área de transferência
     loadScreenshots();
+
+    if (process.platform === 'win32') {
+      detectExplorerFolder().then(setExplorer);
+    }
+
+    // 3. Monitora a cada 2s para detectar novas imagens copiadas (WhatsApp, navegador, etc.)
+    const interval = setInterval(() => {
+      loadScreenshots();
+    }, 2000);
+
+    return () => clearInterval(interval);
   }, []);
 
   // Monitor de cliques nativos no Raycast:
@@ -72,6 +103,7 @@ export default function Command() {
           if (text.includes('CLICK')) {
             const now = Date.now();
             lastClickTimeRef.current = now;
+            loadScreenshots();
 
             if (clickTimeoutRef.current) {
               clearTimeout(clickTimeoutRef.current);
@@ -171,6 +203,88 @@ export default function Command() {
     }
   };
 
+  const handleSaveToFolder = async (targetItems: ScreenshotFile[], forcedFolder?: ExplorerFolder) => {
+    if (!targetItems || targetItems.length === 0) {
+      showToast({
+        style: Toast.Style.Failure,
+        title: 'Nenhuma foto selecionada',
+        message: 'Clique ou pressione Espaço em pelo menos uma foto antes de salvar.',
+      });
+      return;
+    }
+
+    const det = forcedFolder ? null : await detectExplorerFolder();
+    if (det) {
+      setExplorer(det);
+    }
+
+    const folder = forcedFolder ?? det?.folder ?? explorer?.folder;
+
+    if (!folder) {
+      const candidates = det?.candidates ?? explorer?.candidates ?? [];
+      if (candidates.length === 0) {
+        showToast({
+          style: Toast.Style.Failure,
+          title: 'Nenhuma pasta do Explorer aberta',
+          message: 'Abra a pasta de destino no Windows Explorer e tente novamente.',
+        });
+        return;
+      } else {
+        showToast({
+          style: Toast.Style.Failure,
+          title: 'Várias pastas abertas',
+          message: "Use a opção 'Salvar em Outra Pasta Aberta…' (Ctrl+Shift+S) para escolher.",
+        });
+        return;
+      }
+    }
+
+    if (!folder.isFileSystem) {
+      showToast({
+        style: Toast.Style.Failure,
+        title: 'Pasta não suportada',
+        message: `"${folder.name}" não é uma pasta do disco. Abra uma pasta real no Explorer.`,
+      });
+      return;
+    }
+
+    try {
+      const result = saveImagesToFolder(targetItems, folder.path);
+
+      if (result.errors.length === 0 && result.saved.length > 0) {
+        clearSelection();
+        const count = result.saved.length;
+        const msg = `✔ ${count} ${count === 1 ? 'imagem salva' : 'imagens salvas'} em ${folder.name}`;
+        await showHUD(msg);
+      } else if (result.saved.length > 0) {
+        clearSelection();
+        showToast({
+          style: Toast.Style.Success,
+          title: 'Fotos salvas parcialmente',
+          message: `${result.saved.length} salvas, ${result.skipped.length} ignoradas, ${result.errors.length} erro(s): ${result.errors[0]?.message}`,
+        });
+      } else if (result.skipped.length > 0 && result.errors.length === 0) {
+        showToast({
+          style: Toast.Style.Animated,
+          title: 'Arquivos já estão nesta pasta',
+          message: 'As imagens selecionadas já se encontram na pasta de destino.',
+        });
+      } else {
+        showToast({
+          style: Toast.Style.Failure,
+          title: 'Erro ao salvar fotos',
+          message: result.errors[0]?.message || 'Não foi possível salvar os arquivos.',
+        });
+      }
+    } catch (err: any) {
+      showToast({
+        style: Toast.Style.Failure,
+        title: 'Erro inesperado ao salvar',
+        message: err.message,
+      });
+    }
+  };
+
   const handleSelectionChange = (id: string | null) => {
     logDebug(`handleSelectionChange: id=${id}`);
     if (!id) return;
@@ -200,10 +314,18 @@ export default function Command() {
   };
 
   const selectedCount = selectedIds.size;
+  const selectedItems = screenshots.filter(s => selectedIds.has(s.id));
 
   const searchPlaceholder = selectedCount > 0
-    ? `${selectedCount} ${selectedCount === 1 ? 'print selecionado' : 'prints selecionados'} • Espaço ou Clique para marcar • Enter para Abrir na Lousa`
-    : 'Clique na foto ou use Espaço para marcar • Enter para Abrir na Lousa';
+    ? `${selectedCount} ${selectedCount === 1 ? 'print selecionado' : 'prints selecionados'} • Espaço para marcar • Enter Lousa • Ctrl+S Salvar na pasta`
+    : 'Clique na foto ou use Espaço • Enter Lousa • Ctrl+S Salvar na pasta';
+
+  const refreshAll = () => {
+    loadScreenshots();
+    if (process.platform === 'win32') {
+      detectExplorerFolder().then(setExplorer);
+    }
+  };
 
   return (
     <Grid
@@ -222,7 +344,7 @@ export default function Command() {
             <Action
               title="Atualizar Lista"
               icon={Icon.ArrowClockwise}
-              onAction={loadScreenshots}
+              onAction={refreshAll}
             />
           </ActionPanel>
         }
@@ -230,6 +352,10 @@ export default function Command() {
 
       {screenshots.map((item, index) => {
         const isSelected = selectedIds.has(item.id);
+        const targetFiles = selectedCount > 0 ? selectedItems : [item];
+        const qtdLabel = selectedCount > 0
+          ? `${selectedCount} ${selectedCount === 1 ? 'Foto' : 'Fotos'}`
+          : 'Foto';
 
         return (
           <Grid.Item
@@ -262,7 +388,39 @@ export default function Command() {
                   onAction={() => handleOpenLousa(selectedCount > 0 ? undefined : [item.path])}
                 />
 
-                {/* 2. ALTERNAR SELEÇÃO VIA TECLADO COM BARRA DE ESPAÇO */}
+                {/* 2. SALVAR NA PASTA DO WINDOWS EXPLORER (CTRL + S) */}
+                {process.platform === 'win32' && (
+                  <>
+                    <Action
+                      title={
+                        explorer?.folder
+                          ? `Salvar ${qtdLabel} na Pasta "${truncate(explorer.folder.name, 28)}"`
+                          : `Salvar ${qtdLabel} na Pasta Aberta do Explorer`
+                      }
+                      icon={Icon.SaveDocument}
+                      shortcut={{ modifiers: ["ctrl"], key: "s" }}
+                      onAction={() => handleSaveToFolder(targetFiles)}
+                    />
+
+                    <ActionPanel.Submenu
+                      title="Salvar em Outra Pasta Aberta…"
+                      icon={Icon.Folder}
+                      shortcut={{ modifiers: ["ctrl", "shift"], key: "s" }}
+                      onOpen={() => detectExplorerFolder().then(setExplorer)}
+                    >
+                      {(explorer?.candidates ?? []).filter(c => c.isFileSystem).map(c => (
+                        <Action
+                          key={c.path}
+                          title={c.name}
+                          icon={Icon.Folder}
+                          onAction={() => handleSaveToFolder(targetFiles, c)}
+                        />
+                      ))}
+                    </ActionPanel.Submenu>
+                  </>
+                )}
+
+                {/* 3. ALTERNAR SELEÇÃO VIA TECLADO COM BARRA DE ESPAÇO */}
                 <Action
                   title={isSelected ? "Desmarcar este Print (Espaço)" : "Marcar este Print (Espaço)"}
                   icon={isSelected ? Icon.Circle : Icon.CheckCircle}
@@ -287,7 +445,7 @@ export default function Command() {
                     title="Atualizar Lista"
                     icon={Icon.ArrowClockwise}
                     shortcut={{ modifiers: ["ctrl"], key: "r" }}
-                    onAction={loadScreenshots}
+                    onAction={refreshAll}
                   />
                 </ActionPanel.Section>
               </ActionPanel>

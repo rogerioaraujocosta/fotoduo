@@ -32,8 +32,6 @@ export function getScreenshotDirs(): string[] {
     path.join(userProfile, 'Pictures', 'Capturas de tela'),
     path.join(userProfile, 'Pictures', 'Screenshots'),
     path.join(userProfile, 'Imagens', 'Capturas de tela'),
-    // Cache de imagens da área de transferência do Raycast
-    path.join(userProfile, 'AppData', 'Local', 'Raycast', 'clipboard'),
   ];
 
   return dirs.filter(dir => {
@@ -45,21 +43,21 @@ export function getScreenshotDirs(): string[] {
   });
 }
 
-export function getClipboardHelperExe(): string {
+export function getHelperExe(fileName: string): string {
   const candidates: string[] = [];
 
   try {
     if (environment && environment.assetsPath) {
-      candidates.push(path.join(environment.assetsPath, 'bin', 'fotoduo-clipboard.exe'));
+      candidates.push(path.join(environment.assetsPath, 'bin', fileName));
     }
   } catch {}
 
   candidates.push(
-    path.join(__dirname, '..', 'assets', 'bin', 'fotoduo-clipboard.exe'),
-    path.join(__dirname, 'assets', 'bin', 'fotoduo-clipboard.exe'),
-    path.join(__dirname, 'bin', 'fotoduo-clipboard.exe'),
-    path.join(__dirname, '..', 'server', 'bin', 'fotoduo-clipboard.exe'),
-    path.join(__dirname, 'server', 'bin', 'fotoduo-clipboard.exe'),
+    path.join(__dirname, '..', 'assets', 'bin', fileName),
+    path.join(__dirname, 'assets', 'bin', fileName),
+    path.join(__dirname, 'bin', fileName),
+    path.join(__dirname, '..', 'server', 'bin', fileName),
+    path.join(__dirname, 'server', 'bin', fileName),
   );
 
   for (const c of candidates) {
@@ -71,6 +69,10 @@ export function getClipboardHelperExe(): string {
   }
 
   return candidates[2];
+}
+
+export function getClipboardHelperExe(): string {
+  return getHelperExe('fotoduo-clipboard.exe');
 }
 
 /**
@@ -125,6 +127,67 @@ export function getClipboardImage(): Promise<ClipboardGrabResult | null> {
   });
 }
 
+export function getImageDimensions(filePath: string): { width: number; height: number } | null {
+  try {
+    const ext = path.extname(filePath).toLowerCase();
+    const fd = fs.openSync(filePath, 'r');
+    const buf = Buffer.alloc(4096);
+    const bytesRead = fs.readSync(fd, buf, 0, 4096, 0);
+    fs.closeSync(fd);
+
+    if (bytesRead < 24) return null;
+
+    if (ext === '.png' && buf.toString('ascii', 1, 4) === 'PNG') {
+      return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+    }
+
+    if (ext === '.jpg' || ext === '.jpeg') {
+      let offset = 2;
+      while (offset < bytesRead - 8) {
+        if (buf[offset] !== 0xFF) break;
+        const marker = buf[offset + 1];
+        if (marker === 0xC0 || marker === 0xC1 || marker === 0xC2) {
+          const height = buf.readUInt16BE(offset + 5);
+          const width = buf.readUInt16BE(offset + 7);
+          return { width, height };
+        }
+        const length = buf.readUInt16BE(offset + 2);
+        offset += 2 + length;
+      }
+    }
+  } catch {}
+  return null;
+}
+
+export function isDuplicateScreenshot(
+  a: { path: string; size: number; mtime: number; isClipboard?: boolean },
+  b: { path: string; size: number; mtime: number; isClipboard?: boolean }
+): boolean {
+  if (a.path === b.path) return true;
+
+  const sameSize = a.size === b.size;
+  const timeDiff = Math.abs(a.mtime - b.mtime);
+
+  // Arquivos com mesmo tamanho em janela de 60 segundos são duplicatas
+  if (sameSize && timeDiff < 60000) return true;
+
+  // Se um é print do disco (OneDrive/Capturas) e o outro é do cache de clipboard (Win+Shift+S salva em ambos)
+  if (a.isClipboard !== b.isClipboard && timeDiff < 12000) {
+    if (Math.abs(a.size - b.size) < 200000) {
+      const dimA = getImageDimensions(a.path);
+      const dimB = getImageDimensions(b.path);
+      if (dimA && dimB && dimA.width === dimB.width && dimA.height === dimB.height) {
+        return true;
+      }
+      if (timeDiff < 4000) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 /**
  * Escaneia pastas de capturas com otimização de alta performance (< 10ms mesmo com 10.000+ arquivos)
  */
@@ -155,10 +218,9 @@ export function getRecentScreenshots(limit = 40): ScreenshotFile[] {
         matches.sort().reverse();
         candidateFiles = matches.slice(0, 25);
       } else if (isClipboardDir) {
-        // No cache de clipboard, pegamos os mais recentes
+        // No cache de clipboard, pegamos todos os válidos para ordenar por data exata
         const valid = files.filter(f => validExtensions.has(path.extname(f).toLowerCase()));
-        valid.sort().reverse();
-        candidateFiles = valid.slice(0, 25);
+        candidateFiles = valid;
       } else if (files.length > 50) {
         const valid = files.filter(f => validExtensions.has(path.extname(f).toLowerCase()));
         valid.sort().reverse();
@@ -199,22 +261,7 @@ export function getRecentScreenshots(limit = 40): ScreenshotFile[] {
   // Desduplicar capturas que foram salvas simultaneamente no clipboard e no OneDrive/Windows
   const deduplicated: typeof rawItems = [];
   for (const item of rawItems) {
-    const isDuplicate = deduplicated.some(existing => {
-      if (existing.path === item.path) return true;
-
-      const sameSize = existing.size === item.size;
-      const timeDiff = Math.abs(existing.mtime - item.mtime);
-
-      if (sameSize && timeDiff < 15000) return true;
-
-      // Se uma é do clipboard e outra da pasta de prints salva nos últimos 6 segundos
-      if (existing.isClipboard !== item.isClipboard && timeDiff < 6000 && Math.abs(existing.size - item.size) < 15000) {
-        return true;
-      }
-
-      return false;
-    });
-
+    const isDuplicate = deduplicated.some(existing => isDuplicateScreenshot(existing, item));
     if (!isDuplicate) {
       deduplicated.push(item);
     }
@@ -222,7 +269,9 @@ export function getRecentScreenshots(limit = 40): ScreenshotFile[] {
 
   return deduplicated.slice(0, limit).map(item => ({
     id: Buffer.from(item.path).toString('base64url'),
-    name: item.isClipboard && !item.name.startsWith('📸') ? `📸 Print ${item.name}` : item.name,
+    name: item.isClipboard
+      ? (item.name.startsWith('clip-') ? '📸 Imagem Copiada' : item.name.startsWith('📸') ? item.name : `📸 ${item.name}`)
+      : item.name,
     path: item.path,
     size: item.size,
     mtime: item.mtime,
@@ -251,21 +300,24 @@ export async function getAllScreenshotsWithClipboard(limit = 10): Promise<{
 
   if (clipResult && clipResult.file) {
     const clipFile = clipResult.file;
-    const existingIndex = items.findIndex(
-      it => it.path === clipFile.path || (Math.abs(it.mtime - clipFile.mtime) < 6000 && Math.abs(it.size - clipFile.size) < 15000)
-    );
+    const existingIndex = items.findIndex(it => isDuplicateScreenshot(it, clipFile));
 
     if (existingIndex >= 0) {
-      // Move para o topo se foi detectado como cópia recente
-      const [existing] = items.splice(existingIndex, 1);
-      items.unshift({
-        ...existing,
-        name: clipResult.isNew ? '📸 Nova Captura da Área de Transferência' : existing.name,
-        dateFormatted: clipResult.isNew ? 'Copiado agora' : existing.dateFormatted,
-        isClipboard: true,
-      });
-      if (clipResult.isNew) {
-        newClipboardFile = items[0];
+      const existing = items[existingIndex];
+      if (!existing.isClipboard) {
+        // Já existe como print oficial do disco (ex: "Captura de tela..."), não duplica
+      } else {
+        // Move para o topo se foi detectado como cópia recente
+        items.splice(existingIndex, 1);
+        items.unshift({
+          ...existing,
+          name: clipResult.isNew ? '📸 Imagem Copiada (Área de Transferência)' : existing.name,
+          dateFormatted: clipResult.isNew ? 'Copiado agora' : existing.dateFormatted,
+          isClipboard: true,
+        });
+        if (clipResult.isNew) {
+          newClipboardFile = items[0];
+        }
       }
     } else {
       // Adiciona no topo

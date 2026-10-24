@@ -10,8 +10,10 @@
 
 O **Fotoduo** é uma extensão de alta produtividade para o **Raycast** (com suporte nativo a Windows e macOS) que resolve o problema de juntar múltiplos prints rapidamente:
 
-- 🏎️ **Detecção Instantânea**: Lista suas capturas mais recentes do Windows / OneDrive e imagens recém-copiadas para a Área de Transferência.
+- 🏎️ **Detecção Instantânea & WhatsApp Web**: Lista suas capturas mais recentes do Windows / OneDrive e imagens copiadas em tempo real de qualquer app (WhatsApp, navegador, etc.) com polling silencioso.
+- 🧹 **Desduplicação Inteligente**: Elimina entradas repetidas comparando dimensões reais de imagem (largura × altura) quando uma captura de tela é salva em disco e na Área de Transferência simultaneamente (<kbd>Win</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd>).
 - 🎯 **Seleção com 1 Clique**: Clique nas fotos desejadas ou use a barra de espaço.
+- 📁 **Salvar Direto na Pasta Aberta do Windows**: Pressione <kbd>Ctrl</kbd> + <kbd>S</kbd> para copiar as imagens selecionadas direto para a última pasta aberta/focada no Windows Explorer (com detecção inteligente de z-order e abas do Win 11). Submenu <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd> para escolher outra pasta aberta.
 - 🎨 **Lousa Visual Completa (Canvas)**:
   - **Aparar Bordas (Crop)**: Remova barras de endereço, abas ou a barra de tarefas do Windows.
   - **Tarja de Privacidade / Borracha**: Oculte dados sensíveis (senhas, emails, valores) com tarjas elegantes.
@@ -67,9 +69,10 @@ Para rodar o Fotoduo na sua máquina, você só precisa de:
   - `konva` & `react-konva`: Renderização de Canvas 2D acelerada via GPU com suporte a drag-and-drop, zoom e corte.
   - `tailwindcss` & `lucide-react`: Estilização moderna e ícones.
   - `vite`: Build ultrarrápido do frontend.
-- **Ponte Local & Helper**:
+- **Ponte Local & Helpers**:
   - `server/index.js`: Servidor local leve que conecta o Raycast à lousa.
   - `assets/bin/fotoduo-clipboard.exe`: Helper C# nativo ultrarrápido para leitura e gravação silenciosa da Área de Transferência do Windows.
+  - `assets/bin/fotoduo-explorer.exe`: Helper C# nativo para detecção de z-order e abas ativas do Windows Explorer.
 
 ---
 
@@ -100,11 +103,18 @@ O agente executará a rotina de setup de forma 100% autônoma, validando os buil
   - <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>A</kbd>: Limpar seleção.
   - <kbd>Ctrl</kbd> + <kbd>R</kbd>: Atualizar lista de capturas.
 
-### 3. Abrir na Lousa Fotoduo
+### 3. Salvar na Pasta Aberta do Explorer (Novo!)
+- Abra a pasta de destino no Windows Explorer antes de abrir a extensão.
+- Selecione 1 ou vários prints no Fotoduo.
+- Pressione <kbd>Ctrl</kbd> + <kbd>S</kbd> (ou acesse via menu de ações <kbd>Ctrl</kbd> + <kbd>K</kbd>).
+- Os arquivos serão copiados diretamente para essa pasta com nomes organizados (`Imagem AAAA-MM-DD...` para clipboards) e prevenção contra sobrescrita (`(2)`, `(3)`).
+- Dica: use <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd> para escolher outra pasta se houver várias abertas.
+
+### 4. Abrir na Lousa Fotoduo
 - Pressione <kbd>Enter</kbd> (ou clique na ação principal).
 - A Lousa Fotoduo se abrirá em uma janela nativa dedicada (modo aplicativo).
 
-### 4. Editar e Exportar
+### 5. Editar e Exportar
 - Ajuste a posição das imagens arrastando livremente.
 - Use as ferramentas da barra superior:
   - ✂️ **Aparar Topo / Base**: Remova barras do navegador e do Windows com 1 clique.

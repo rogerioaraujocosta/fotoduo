@@ -10,7 +10,7 @@ Este documento foi preparado especialmente para orientar assistentes e agentes d
 - **Stack**:
   - Extensão Raycast: TypeScript, React, `@raycast/api`, `@raycast/utils`.
   - Frontend da Lousa: Vite, React, TypeScript, Konva / `react-konva`, TailwindCSS (`web/`).
-  - Ponte Local & Helper: Node.js HTTP Server (`server/`), C# Clipboard Helper (`assets/bin/fotoduo-clipboard.exe`).
+  - Ponte Local & Helpers: Node.js HTTP Server (`server/`), C# Clipboard Helper (`assets/bin/fotoduo-clipboard.exe`), C# Explorer Helper (`assets/bin/fotoduo-explorer.exe`).
 
 ---
 
@@ -55,6 +55,9 @@ node -e "console.log(require('fs').existsSync('web/dist/index.html') ? 'OK: web/
 
 # 3. Testar a inicialização do servidor de lousa
 node server/launcher.js
+
+# 4. Testar o helper de detecção do Explorer
+node -e "require('child_process').execFile('assets/bin/fotoduo-explorer.exe', {windowsHide:true, timeout:4000}, (err, out) => console.log(JSON.parse(out).success ? 'OK: fotoduo-explorer.exe funcional' : 'ERRO'))"
 ```
 
 ---
